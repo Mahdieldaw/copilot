@@ -68,7 +68,8 @@ export const SliderField: React.FC<InputProps> = ({ config, value, onChange }) =
 };
 
 export const TagInput: React.FC<InputProps> = ({ config, value, onChange }) => {
-  const tags = (value as string).split(',').filter(Boolean);
+  const stringValue = String(value ?? '');
+  const tags = stringValue.split(',').filter(Boolean);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' || e.key === ',') {
@@ -109,7 +110,8 @@ export const TagInput: React.FC<InputProps> = ({ config, value, onChange }) => {
 };
 
 export const CheckboxGroup: React.FC<InputProps> = ({ config, value, onChange }) => {
-  const selectedValues = (value as string).split(',').filter(Boolean);
+  const stringValue = String(value ?? '');
+  const selectedValues = stringValue.split(',').filter(Boolean);
 
   const toggleValue = (optionValue: string) => {
     const newSelected = selectedValues.includes(optionValue)

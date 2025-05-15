@@ -36,7 +36,7 @@ function App() {
   useEffect(() => {
     let template = editablePromptTemplate;
     Object.entries(inputs).forEach(([key, value]) => {
-      const valStr = typeof value === 'number' ? String(value) : value || '';
+      const valStr = String(value ?? ''); // Ensure value is always a string
       template = template.replace(new RegExp(`{{${key}}}`, 'g'), valStr);
     });
     setCurrentPromptTemplate(template);
