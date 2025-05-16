@@ -10,6 +10,23 @@ import {
   TagInput,
   CheckboxGroup
 } from './components/inputs/FormInputs';
+import { useAIExecution } from '@/hooks/useAIExecution'; // Updated import path to use alias
+
+// Placeholder functions
+const copyText = (text: string) => {
+  navigator.clipboard.writeText(text).then(() => {
+    console.log('Text copied to clipboard');
+  }).catch(err => {
+    console.error('Failed to copy text: ', err);
+  });
+};
+
+const recordFeedback = (isPositive: boolean) => {
+  console.log(`Feedback recorded: ${isPositive ? 'Positive' : 'Negative'}`);
+};
+
+// Simple Spinner component (can be moved to a separate file later)
+const Spinner = () => <div className="spinner">Loading...</div>;
 
 function App() {
   const archetypes: ArchetypesMap = archetypesData;
@@ -20,6 +37,8 @@ function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState('configuration');
   
+  const { run, cancel, response: aiOutput, status, error } = useAIExecution(); // Initialize hook
+
   const currentArchetype = archetypes[selectedArchetypeKey];
 
   // Initialize inputs when archetype changes
@@ -85,7 +104,9 @@ function App() {
       case 'CheckboxGroup':
         return <CheckboxGroup {...props} />;
       case 'ReadOnlyTextArea':
-        return <TextAreaField {...props} />;
+        // Ensure ReadOnlyTextArea also gets the correct value prop if it's meant to display aiOutput
+        // For now, assuming it's like other inputs
+        return <TextAreaField {...props} readOnly={true} />;
       default:
         return null;
     }
@@ -127,7 +148,7 @@ function App() {
               className={activeTab === 'preview' ? 'active' : ''} 
               onClick={() => setActiveTab('preview')}
             >
-              Preview
+              Preview & Run AI
             </button>
           </div>
 
@@ -153,10 +174,35 @@ function App() {
                 placeholder="Edit the prompt template..."
               />
               <div className="preview-output">
-                <h3>Preview:</h3>
+                <h3>Preview (Editable Template):</h3>
                 <pre>{currentPromptTemplate}</pre>
               </div>
-              <button onClick={handleResetToDefaults}>Reset to Default</button>
+              <button onClick={handleResetToDefaults}>Reset to Default Template</button>
+              
+              <hr style={{margin: '20px 0'}} />
+
+              <h3>AI Interaction</h3>
+              <Button onClick={() => run(currentPromptTemplate)} disabled={status === 'loading' || !currentPromptTemplate.trim()}>
+                {status === 'loading' ? 'Running…' : 'Run AI'}
+              </Button>
+
+              <div className="ai-output-panel">
+                {status === 'idle' && !aiOutput && <p>Click “Run AI” to generate output.</p>}
+                {status === 'loading' && <Spinner />}
+                {aiOutput && <pre>{aiOutput}</pre>}
+                {status === 'error' && <p className="error">Error: {error}</p>}
+              </div>
+
+              {status === 'loading' && <Button onClick={cancel}>Cancel</Button>}
+              {status === 'done' && <Button onClick={() => run(currentPromptTemplate)} disabled={!currentPromptTemplate.trim()}>Regenerate</Button>}
+
+              {status === 'done' && aiOutput && (
+                <div className="actions-panel" style={{marginTop: '10px'}}>
+                  <Button onClick={() => copyText(aiOutput)}>Copy Output</Button>
+                  <Button onClick={() => recordFeedback(true)} style={{marginLeft: '5px'}}>👍</Button>
+                  <Button onClick={() => recordFeedback(false)} style={{marginLeft: '5px'}}>👎</Button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -164,5 +210,10 @@ function App() {
     </div>
   );
 }
+
+// Basic Button component to avoid TS errors for now, can be replaced with actual UI library button
+const Button = (props: React.ButtonHTMLAttributes<HTMLButtonElement>) => {
+  return <button {...props} />;
+};
 
 export default App;

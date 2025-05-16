@@ -1,6 +1,15 @@
 export interface ArchetypeInput {
   name: string;
-  type: 'TextInput' | 'LargeTextArea' | 'Dropdown' | 'Slider' | 'CheckboxGroup' | 'TagInput' | 'TwoPanelEditor' | 'ReadOnlyTextArea' | 'JSON';
+  type:
+    | 'TextInput'
+    | 'LargeTextArea'
+    | 'Dropdown'
+    | 'Slider'
+    | 'CheckboxGroup'
+    | 'TagInput'
+    | 'TwoPanelEditor'
+    | 'ReadOnlyTextArea'
+    | 'JSON';
   description: string;
   ui_guidance: string;
   defaultValue?: string | number;
@@ -9,6 +18,8 @@ export interface ArchetypeInput {
   min?: number;
   max?: number;
   conditional?: boolean;
+  conditionalField?: string;
+  conditionalValue?: string;
 }
 
 export interface ValidatorProfile {
@@ -23,7 +34,7 @@ export interface StageArchetype {
   purpose: string;
   inputs: ArchetypeInput[];
   ai_instructions_template: string;
-  validator_profiles?: ValidatorProfile[];
+  validator_profiles?: ValidatorProfile[]; // optional is safest
 }
 
 export type ArchetypesMap = Record<string, StageArchetype>;
