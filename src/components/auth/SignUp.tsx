@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface SignUpProps {
   onSuccess?: () => void;
@@ -11,21 +12,7 @@ export const SignUp = ({ onSuccess, onCancel }: SignUpProps) => {
   const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-
-  // This is a placeholder function that will be replaced with actual Firebase auth
-  // once Firebase is integrated into the project
-  const handleSignUp = async (email: string, password: string, displayName: string) => {
-    // Simulate API call
-    return new Promise<void>((resolve, reject) => {
-      setTimeout(() => {
-        if (email && password.length >= 6) {
-          resolve();
-        } else {
-          reject(new Error('Invalid email or password (must be at least 6 characters)'));
-        }
-      }, 1000);
-    });
-  };
+  const { signUp } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,8 +20,7 @@ export const SignUp = ({ onSuccess, onCancel }: SignUpProps) => {
     setLoading(true);
 
     try {
-      await handleSignUp(email, password, displayName);
-      if (onSuccess) onSuccess();
+      await signUp(email, password, displayName);
     } catch (err: any) {
       setError(err.message || 'Failed to create an account');
     } finally {

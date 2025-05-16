@@ -1,27 +1,19 @@
 import { useState } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface UserProfileProps {
-  user?: {
-    displayName?: string | null;
-    email?: string | null;
-    photoURL?: string | null;
-  } | null;
   onSignOut?: () => void;
 }
 
-export const UserProfile = ({ user, onSignOut }: UserProfileProps) => {
+export const UserProfile = ({ onSignOut }: UserProfileProps) => {
   const [loading, setLoading] = useState(false);
+  const { currentUser, logOut } = useAuth();
 
-  // This is a placeholder function that will be replaced with actual Firebase auth
-  // once Firebase is integrated into the project
   const handleSignOut = async () => {
-    if (!onSignOut) return;
-    
     setLoading(true);
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 500));
-      onSignOut();
+      await logOut();
+      if (onSignOut) onSignOut();
     } catch (error) {
       console.error('Error signing out:', error);
     } finally {
@@ -29,23 +21,23 @@ export const UserProfile = ({ user, onSignOut }: UserProfileProps) => {
     }
   };
 
-  if (!user) return null;
+  if (!currentUser) return null;
 
   return (
     <div className="user-profile">
       <div className="user-info">
         <div className="user-avatar">
-          {user.photoURL ? (
-            <img src={user.photoURL} alt="User avatar" />
+          {currentUser.photoURL ? (
+            <img src={currentUser.photoURL} alt="User avatar" />
           ) : (
             <div className="avatar-placeholder">
-              {user.displayName?.charAt(0) || user.email?.charAt(0) || '?'}
+              {currentUser.displayName?.charAt(0) || currentUser.email?.charAt(0) || '?'}
             </div>
           )}
         </div>
         <div className="user-details">
-          <div className="user-name">{user.displayName || 'User'}</div>
-          <div className="user-email">{user.email}</div>
+          <div className="user-name">{currentUser.displayName || 'User'}</div>
+          <div className="user-email">{currentUser.email}</div>
         </div>
       </div>
       <button 

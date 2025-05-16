@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface SignInProps {
   onSuccess?: () => void;
@@ -10,21 +11,7 @@ export const SignIn = ({ onSuccess, onSignUpClick }: SignInProps) => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-
-  // This is a placeholder function that will be replaced with actual Firebase auth
-  // once Firebase is integrated into the project
-  const handleSignIn = async (email: string, password: string) => {
-    // Simulate API call
-    return new Promise<void>((resolve, reject) => {
-      setTimeout(() => {
-        if (email === 'test@example.com' && password === 'password') {
-          resolve();
-        } else {
-          reject(new Error('Invalid email or password'));
-        }
-      }, 1000);
-    });
-  };
+  const { signIn } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,8 +19,7 @@ export const SignIn = ({ onSuccess, onSignUpClick }: SignInProps) => {
     setLoading(true);
 
     try {
-      await handleSignIn(email, password);
-      if (onSuccess) onSuccess();
+      await signIn(email, password);
     } catch (err: any) {
       setError(err.message || 'Failed to sign in');
     } finally {

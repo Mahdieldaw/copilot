@@ -1,38 +1,32 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AuthContainer } from '../components/auth/AuthContainer';
 import { UserProfile } from '../components/auth/UserProfile';
+import { useAuth } from '../contexts/AuthContext';
 import '../styles/auth.css';
 import '../styles/user-profile.css';
 
 export const AuthDemo = () => {
+  const { currentUser, loading } = useAuth();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [user, setUser] = useState<{
-    displayName: string | null;
-    email: string | null;
-    photoURL: string | null;
-  } | null>(null);
 
-  const handleAuthSuccess = () => {
-    // Simulate successful authentication
-    setIsAuthenticated(true);
-    setUser({
-      displayName: 'Demo User',
-      email: 'user@example.com',
-      photoURL: null
-    });
-  };
+  useEffect(() => {
+    if (currentUser) {
+      setIsAuthenticated(true);
+    } else {
+      setIsAuthenticated(false);
+    }
+  }, [currentUser]);
 
-  const handleSignOut = () => {
-    setIsAuthenticated(false);
-    setUser(null);
-  };
+  if (loading) {
+    return <div className="loading">Loading...</div>;
+  }
 
   return (
     <div className="auth-demo-container">
       <div className="auth-demo-header">
         <h1>Hybrid Thinking Workflow</h1>
-        {isAuthenticated && user && (
-          <UserProfile user={user} onSignOut={handleSignOut} />
+        {isAuthenticated && (
+          <UserProfile />
         )}
       </div>
 
@@ -43,12 +37,12 @@ export const AuthDemo = () => {
               <h2>Welcome to Hybrid Thinking Workflow</h2>
               <p>Sign in to access your workflows and templates</p>
             </div>
-            <AuthContainer onAuthSuccess={handleAuthSuccess} />
+            <AuthContainer />
           </>
         ) : (
           <div className="auth-demo-dashboard">
             <h2>Dashboard</h2>
-            <p>Welcome, {user?.displayName || 'User'}! You are now signed in.</p>
+            <p>Welcome, {currentUser?.displayName || 'User'}! You are now signed in.</p>
             <p>This is a placeholder for the main application content.</p>
           </div>
         )}
