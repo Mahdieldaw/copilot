@@ -1,24 +1,55 @@
-# Logs
-logs
+# ============ Logs ============
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
-yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
+# ============ Dependencies / Builds ============
+node_modules/
+dist/
+dist-ssr/
+build/
+.next/
+out/
+coverage/
 
-# Editor directories and files
-.vscode/*
+# ============ Local env & secrets ============
+.env
+.env.local
+.env.*.local
+
+# Firebase local stuff
+.firebase/
+.firebaserc
+
+# ============ IDE / Editor ============
+.vscode/
 !.vscode/extensions.json
-.idea
+.idea/
 .DS_Store
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
+
+# ============ Cache & Misc ============
+.cache/
+*.local
+*.tmp
+tmp/
+*.bak
+*.backup
+*.orig
+.history/
+
+# ============ OS files ============
+Thumbs.db
+desktop.ini
+
+# ============ Security tokens, keys ============
+# If you ever store LLM API keys locally
+*.key
+*.pem

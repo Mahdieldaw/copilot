@@ -1,49 +1,22 @@
-// This is a placeholder file for Firebase configuration
-// Replace with actual Firebase config when implementing Firebase
+// src/firebase.ts
 
-// Simulating Firebase Auth and Firestore services
-const auth = {
-  // Placeholder methods that would be replaced with actual Firebase methods
-  currentUser: null,
-  onAuthStateChanged: (callback: (user: any) => void) => {
-    // Return an unsubscribe function
-    return () => {};
-  }
-};
+import { initializeApp } from "firebase/app";
+import { getAuth } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
 
-const firestore = {
-  // Placeholder methods that would be replaced with actual Firebase methods
-  collection: (path: string) => ({
-    doc: (id: string) => ({
-      set: async (data: any) => {},
-      get: async () => ({
-        exists: false,
-        data: () => ({})
-      })
-    })
-  })
-};
-
-// Export the placeholder services
-export { auth, firestore };
-
-// When implementing Firebase, this file would be replaced with:
-/*
-import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
-
+// Replace the following with your actual Firebase config
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID
+  apiKey: "AIzaSyB0GH-IzFy47-NwIg4uruyoUzHhel2xOd4",
+  authDomain: "hybrid-thinking.firebaseapp.com",
+  projectId: "hybrid-thinking",
+  storageBucket: "hybrid-thinking.appspot.com",
+  messagingSenderId: "429161076249",
+  appId: "1:429161076249:web" // Replace with full App ID if available
 };
 
+// Initialize Firebase
 const app = initializeApp(firebaseConfig);
+
+// Export Auth and Firestore instances
 export const auth = getAuth(app);
 export const firestore = getFirestore(app);
-export default app;
-*/
