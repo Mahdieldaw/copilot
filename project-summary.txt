@@ -1,0 +1,1178 @@
+
+===== package.json =====
+
+{
+  "name": "copilot",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.25.0",
+    "@types/node": "^22.15.18",
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "@vitejs/plugin-react": "^4.4.1",
+    "eslint": "^9.25.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.19",
+    "globals": "^16.0.0",
+    "typescript": "~5.8.3",
+    "typescript-eslint": "^8.30.1",
+    "vite": "^6.3.5"
+  }
+}
+
+===== vite.config.ts =====
+
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import { fileURLToPath } from 'url'
+import path from 'path'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
+// https://vite.dev/config/
+export default defineConfig({
+  plugins: [react()],
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src'), // Points to copilot/src
+      '$common': path.resolve(__dirname, '../src') // Points to qwen v.0/src
+    }
+  },
+  server: {
+    fs: {
+      // Allow serving files from one level up (qwen v.0 directory) and the workspace root
+      allow: [
+        path.resolve(__dirname, '..'), // This is qwen v.0/
+      ]
+    }
+  }
+})
+
+===== tsconfig.json =====
+
+{
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.app.json" },
+    { "path": "./tsconfig.node.json" }
+  ]
+}
+
+===== src/services/ai.ts =====
+
+// src/services/ai.ts
+// Gemini API related interfaces (assuming these are correct for your model)
+interface Part {
+  text: string;
+}
+
+interface Content {
+  parts: Part[];
+  role?: string;
+}
+
+interface GenerationConfig {
+  temperature?: number;
+  topK?: number;
+  topP?: number;
+  maxOutputTokens?: number;
+  candidateCount?: number;
+  stopSequences?: string[];
+}
+
+interface GeminiStreamResponseCandidate {
+  content?: {
+    parts?: Part[];
+    role?: string;
+  };
+  finishReason?: string;
+  index?: number;
+  safetyRatings?: Array<{
+    category: string;
+    probability: string;
+  }>;
+}
+
+interface GeminiStreamResponse {
+  candidates?: GeminiStreamResponseCandidate[];
+  promptFeedback?: {
+    blockReason?: string;
+    safetyRatings?: Array<{
+      category: string;
+      probability: string;
+    }>;
+  };
+}
+
+let abortController = new AbortController();
+
+export async function* sendPrompt(
+  prompt: string,
+  systemInstructionText?: string,
+  generationConfig?: GenerationConfig
+): AsyncGenerator<string, void, undefined> {
+  console.log(`Sending prompt: ${prompt}`);
+  if (systemInstructionText) {
+    console.log(`With system instruction: ${systemInstructionText}`);
+  }
+  if (generationConfig) {
+    console.log(`With generation config: ${JSON.stringify(generationConfig)}`);
+  }
+
+  const requestBody: {
+    contents: Content[];
+    system_instruction?: Content;
+    generation_config?: GenerationConfig;
+  } = {
+    contents: [{ parts: [{ text: prompt }] }],
+  };
+
+  if (systemInstructionText) {
+    requestBody.system_instruction = { parts: [{ text: systemInstructionText }] };
+  }
+
+  if (generationConfig) {
+    requestBody.generation_config = generationConfig;
+  }
+
+  const MODEL_NAME = 'models/gemini-1.5-flash-latest'; // Or your preferred model
+  let url = `https://generativelanguage.googleapis.com/v1beta/${MODEL_NAME}:streamGenerateContent?key=${import.meta.env.VITE_GEMINI_API_KEY}`;
+  
+  let response = await fetch(
+    url,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+      signal: abortController.signal,
+    }
+  );
+
+  // Fallback for specific errors or if streaming endpoint is problematic
+  if (!response.ok && (response.status === 404 || response.status === 500 || response.status === 400)) {
+    console.warn(`Streaming endpoint returned ${response.status}, attempting fallback to non-streaming.`);
+    const nonStreamingModelName = 'models/gemini-1.5-flash-latest'; // Ensure this is a valid non-streaming model
+    url = `https://generativelanguage.googleapis.com/v1beta/${nonStreamingModelName}:generateContent?key=${import.meta.env.VITE_GEMINI_API_KEY}`;
+    
+    response = await fetch(
+      url,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+        signal: abortController.signal,
+      }
+    );
+  }
+
+  if (!response.ok) {
+    let errorBody = '';
+    try { errorBody = await response.text(); } catch (e) { /* ignore */ }
+    console.error(`HTTP error! Status: ${response.status}. Body: ${errorBody}`);
+    throw new Error(`HTTP error! status: ${response.status} ${response.statusText}. Details: ${errorBody}`);
+  }
+
+  const isStreaming = url.includes(':streamGenerateContent');
+  
+  if (isStreaming) {
+    if (!response.body) throw new Error('Response body is null for streaming request.');
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // Try to find and parse complete JSON objects in the buffer
+        // This looks for standalone JSON objects starting with '{' and ending with '}'
+        let objStartIndex = buffer.indexOf('{');
+        while (objStartIndex !== -1) {
+          let openBraces = 0;
+          let objEndIndex = -1;
+
+          for (let i = objStartIndex; i < buffer.length; i++) {
+            if (buffer[i] === '{') {
+              openBraces++;
+            } else if (buffer[i] === '}') {
+              openBraces--;
+              if (openBraces === 0) {
+                objEndIndex = i;
+                break;
+              }
+            }
+          }
+
+          if (objEndIndex !== -1) {
+            // Found a complete JSON object string
+            const jsonString = buffer.substring(objStartIndex, objEndIndex + 1);
+            buffer = buffer.substring(objEndIndex + 1); // Remove processed part from buffer
+
+            try {
+              const jsonData: GeminiStreamResponse = JSON.parse(jsonString);
+              
+              if (jsonData.promptFeedback?.blockReason) {
+                console.error("Prompt blocked by API:", jsonData.promptFeedback.blockReason, jsonData.promptFeedback.safetyRatings);
+                throw new Error(`Prompt blocked: ${jsonData.promptFeedback.blockReason}`);
+              }
+
+              if (jsonData.candidates && jsonData.candidates.length > 0) {
+                const candidate = jsonData.candidates[0];
+                // Check for finishReason to avoid processing empty final chunks if any
+                if (candidate.finishReason && candidate.finishReason !== "STOP" && candidate.finishReason !== "MAX_TOKENS") {
+                     console.warn("Candidate finished due to:", candidate.finishReason, candidate.safetyRatings);
+                }
+
+                if (candidate.content && candidate.content.parts && candidate.content.parts.length > 0) {
+                  const text = candidate.content.parts[0].text;
+                  if (text) { // Ensure text is not null or undefined
+                    console.log("Yielding text chunk:", text);
+                    yield text;
+                  }
+                }
+              }
+            } catch (e) {
+              console.error('Failed to parse JSON object from stream buffer. Object string:', jsonString, 'Error:', e);
+              // Optionally, decide whether to skip this malformed object or throw an error
+              // For now, we log and continue, trying to find the next valid object.
+            }
+            objStartIndex = buffer.indexOf('{'); // Look for the next potential object in the modified buffer
+          } else {
+            // Incomplete JSON object in buffer, need more data
+            break; 
+          }
+        }
+      }
+      // After the loop, if there's remaining data in the buffer that wasn't processed
+      // (e.g. a truncated final JSON object or non-JSON text), log it.
+      if (buffer.trim()) {
+        console.warn("Unprocessed data remaining in stream buffer:", buffer.trim());
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  } else { // Non-streaming response
+    try {
+      const jsonData = await response.json();
+      console.log('Non-streaming response received:', jsonData);
+      
+      if (jsonData.promptFeedback?.blockReason) {
+        console.error("Prompt blocked by API (non-streaming):", jsonData.promptFeedback.blockReason, jsonData.promptFeedback.safetyRatings);
+        throw new Error(`Prompt blocked: ${jsonData.promptFeedback.blockReason}`);
+      }
+
+      if (jsonData.candidates && jsonData.candidates.length > 0) {
+        const candidate = jsonData.candidates[0];
+        if (candidate.content && candidate.content.parts && candidate.content.parts.length > 0) {
+          const text = candidate.content.parts[0].text;
+          if (text) {
+            console.log("Yielding text from non-stream:", text);
+            yield text;
+          } else {
+            console.warn("Non-streaming response had candidate part with no text.");
+          }
+        } else {
+           console.warn("Non-streaming response candidate had no content parts.");
+        }
+      } else if (jsonData.error) {
+        console.error('API returned an error in non-streaming response JSON:', jsonData.error);
+        throw new Error(`API Error: ${jsonData.error.message} (Code: ${jsonData.error.code}, Status: ${jsonData.error.status})`);
+      } else {
+        console.warn("Non-streaming response did not contain expected candidates or error structure.");
+      }
+    } catch (error) {
+      console.error('Failed to parse or handle non-streaming response:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (errorMessage.startsWith('API Error:') || errorMessage.startsWith('Prompt blocked:')) {
+          throw error; // Re-throw our specific errors
+      }
+      throw new Error(`Failed to process non-streaming response: ${errorMessage}`);
+    }
+  }
+}
+
+export function cancelRequest(): void {
+  abortController.abort();
+  console.log('AI request cancelled by user.');
+  abortController = new AbortController(); // Re-initialize for future requests
+}
+
+===== src/hooks/useAIExecution.ts =====
+
+import { useState, useCallback } from 'react';
+import { sendPrompt, cancelRequest } from '../services/ai'; // Corrected import path
+
+type AIExecutionStatus = 'idle' | 'loading' | 'done' | 'error';
+
+interface UseAIExecutionReturn {
+  response: string;
+  status: AIExecutionStatus;
+  error: string | null;
+  run: (prompt: string) => Promise<void>;
+  cancel: () => void;
+}
+
+export function useAIExecution(): UseAIExecutionReturn {
+  const [response, setResponse] = useState<string>('');
+  const [status, setStatus] = useState<AIExecutionStatus>('idle');
+  const [error, setError] = useState<string | null>(null);
+
+  const run = useCallback(async (prompt: string) => {
+    setResponse('');
+    setError(null);
+    setStatus('loading');
+
+    try {
+      for await (const chunk of sendPrompt(prompt)) {
+        setResponse((prev) => prev + chunk);
+      }
+      setStatus('done');
+    } catch (e) {
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      // Check if the error is due to an abort operation
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        console.log('Request aborted by user.');
+        setStatus('idle'); // Or 'done' if partial response is acceptable, or a new 'cancelled' state
+      } else {
+        setError(errorMessage);
+        setStatus('error');
+      }
+    }
+  }, []);
+
+  const cancel = useCallback(() => {
+    cancelRequest();
+    // Optionally, set status here if needed, e.g., if a request was loading
+    // setStatus('idle'); // Or a 'cancelled' state
+    // The sendPrompt loop should catch the AbortError and handle status
+  }, []);
+
+  return { run, cancel, response, status, error };
+}
+
+===== src/App.tsx =====
+
+import { useState, useEffect } from 'react';
+import './App.css';
+import { archetypesData } from './data/stage_archetypes';
+import type { ArchetypesMap, ArchetypeInput } from './models/StageArchetype';
+import { 
+  TextInputField, 
+  TextAreaField, 
+  DropdownField, 
+  SliderField,
+  TagInput,
+  CheckboxGroup
+} from './components/inputs/FormInputs';
+import { useAIExecution } from '@/hooks/useAIExecution'; // Updated import path to use alias
+
+// Placeholder functions
+const copyText = (text: string) => {
+  navigator.clipboard.writeText(text).then(() => {
+    console.log('Text copied to clipboard');
+  }).catch(err => {
+    console.error('Failed to copy text: ', err);
+  });
+};
+
+const recordFeedback = (isPositive: boolean) => {
+  console.log(`Feedback recorded: ${isPositive ? 'Positive' : 'Negative'}`);
+};
+
+// Simple Spinner component (can be moved to a separate file later)
+const Spinner = () => <div className="spinner">Loading...</div>;
+
+function App() {
+  const archetypes: ArchetypesMap = archetypesData;
+  const [selectedArchetypeKey, setSelectedArchetypeKey] = useState<keyof ArchetypesMap>('IDEATION_AND_EXPLORATION');
+  const [inputs, setInputs] = useState<Record<string, string | number>>({});
+  const [currentPromptTemplate, setCurrentPromptTemplate] = useState('');
+  const [editablePromptTemplate, setEditablePromptTemplate] = useState('');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [activeTab, setActiveTab] = useState('configuration');
+  
+  const { run, cancel, response: aiOutput, status, error } = useAIExecution(); // Initialize hook
+
+  const currentArchetype = archetypes[selectedArchetypeKey];
+
+  // Initialize inputs when archetype changes
+  useEffect(() => {
+    const initialInputs: Record<string, string | number> = {};
+    currentArchetype.inputs.forEach(input => {
+      initialInputs[input.name] = input.defaultValue ?? '';
+    });
+    setInputs(initialInputs);
+    setEditablePromptTemplate(currentArchetype.ai_instructions_template);
+  }, [selectedArchetypeKey]);
+
+  // Update prompt template preview
+  useEffect(() => {
+    let template = editablePromptTemplate;
+    Object.entries(inputs).forEach(([key, value]) => {
+      const valStr = String(value ?? ''); // Ensure value is always a string
+      template = template.replace(new RegExp(`{{${key}}}`, 'g'), valStr);
+    });
+    setCurrentPromptTemplate(template);
+  }, [inputs, editablePromptTemplate]);
+
+  // Handle input changes
+  const handleInputChange = (name: string, value: string | number) => {
+    setInputs(prev => ({ ...prev, [name]: value }));
+  };
+
+  // Handle prompt template changes
+  const handlePromptTemplateChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setEditablePromptTemplate(e.target.value);
+  };
+
+  // Reset to defaults
+  const handleResetToDefaults = () => {
+    const initialInputs: Record<string, string | number> = {};
+    currentArchetype.inputs.forEach(input => {
+      initialInputs[input.name] = input.defaultValue ?? '';
+    });
+    setInputs(initialInputs);
+    setEditablePromptTemplate(currentArchetype.ai_instructions_template);
+  };
+
+  // Render input based on type
+  const renderInput = (input: ArchetypeInput) => {
+    const value = inputs[input.name];
+    const props = {
+      config: input,
+      value,
+      onChange: (val: string | number) => handleInputChange(input.name, val)
+    };
+
+    switch (input.type) {
+      case 'TextInput':
+        return <TextInputField {...props} />;
+      case 'LargeTextArea':
+        return <TextAreaField {...props} />;
+      case 'Dropdown':
+        return <DropdownField {...props} />;
+      case 'Slider':
+        return <SliderField {...props} />;
+      case 'TagInput':
+        return <TagInput {...props} />;
+      case 'CheckboxGroup':
+        return <CheckboxGroup {...props} />;
+      case 'ReadOnlyTextArea':
+        // Ensure ReadOnlyTextArea also gets the correct value prop if it's meant to display aiOutput
+        // For now, assuming it's like other inputs
+        return <TextAreaField {...props} readOnly={true} />;
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div className="app-container">
+      <h1>Hybrid Thinking Workflow Builder</h1>
+      <div className="main-content">
+        <div className={`sidebar ${isSidebarOpen ? 'open' : 'closed'}`}>
+          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
+            {isSidebarOpen ? '←' : '→'}
+          </button>
+          <div className="archetype-list">
+            {Object.entries(archetypes).map(([key, archetype]) => (
+              <button
+                key={key}
+                className={key === selectedArchetypeKey ? 'selected' : ''}
+                onClick={() => setSelectedArchetypeKey(key as keyof ArchetypesMap)}
+              >
+                {archetype.name}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="content-area">
+          <h2>{currentArchetype.name}</h2>
+          <p>{currentArchetype.purpose}</p>
+          
+          <div className="tab-buttons">
+            <button 
+              className={activeTab === 'configuration' ? 'active' : ''} 
+              onClick={() => setActiveTab('configuration')}
+            >
+              Configuration
+            </button>
+            <button 
+              className={activeTab === 'preview' ? 'active' : ''} 
+              onClick={() => setActiveTab('preview')}
+            >
+              Preview & Run AI
+            </button>
+          </div>
+
+          {activeTab === 'configuration' ? (
+            <div className="configuration-panel">
+              <div className="inputs-section">
+                {currentArchetype.inputs.map(input => (
+                  <div key={input.name} className="input-group">
+                    <label htmlFor={input.name}>
+                      {input.ui_guidance}
+                      {input.optional && <span className="optional">(optional)</span>}
+                    </label>
+                    {renderInput(input)}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="preview-panel">
+              <textarea
+                value={editablePromptTemplate}
+                onChange={handlePromptTemplateChange}
+                placeholder="Edit the prompt template..."
+              />
+              <div className="preview-output">
+                <h3>Preview (Editable Template):</h3>
+                <pre>{currentPromptTemplate}</pre>
+              </div>
+              <button onClick={handleResetToDefaults}>Reset to Default Template</button>
+              
+              <hr style={{margin: '20px 0'}} />
+
+              <h3>AI Interaction</h3>
+              <Button onClick={() => run(currentPromptTemplate)} disabled={status === 'loading' || !currentPromptTemplate.trim()}>
+                {status === 'loading' ? 'Running…' : 'Run AI'}
+              </Button>
+
+              <div className="ai-output-panel">
+                {status === 'idle' && !aiOutput && <p>Click “Run AI” to generate output.</p>}
+                {status === 'loading' && <Spinner />}
+                {aiOutput && <pre>{aiOutput}</pre>}
+                {status === 'error' && <p className="error">Error: {error}</p>}
+              </div>
+
+              {status === 'loading' && <Button onClick={cancel}>Cancel</Button>}
+              {status === 'done' && <Button onClick={() => run(currentPromptTemplate)} disabled={!currentPromptTemplate.trim()}>Regenerate</Button>}
+
+              {status === 'done' && aiOutput && (
+                <div className="actions-panel" style={{marginTop: '10px'}}>
+                  <Button onClick={() => copyText(aiOutput)}>Copy Output</Button>
+                  <Button onClick={() => recordFeedback(true)} style={{marginLeft: '5px'}}>👍</Button>
+                  <Button onClick={() => recordFeedback(false)} style={{marginLeft: '5px'}}>👎</Button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Basic Button component to avoid TS errors for now, can be replaced with actual UI library button
+const Button = (props: React.ButtonHTMLAttributes<HTMLButtonElement>) => {
+  return <button {...props} />;
+};
+
+export default App;
+
+===== src/main.tsx =====
+
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import './index.css'
+import App from './App.tsx'
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+)
+
+===== src/components/inputs/FormInputs.tsx =====
+
+import React from 'react';
+import type { ArchetypeInput } from '../../models/StageArchetype'; // Adjusted path assuming models is at src/models
+
+export interface InputProps {
+  config: ArchetypeInput;
+  value: string | number; // Value can be string or number
+  onChange: (value: string | number) => void;
+  readOnly?: boolean;
+}
+
+export const TextInputField: React.FC<InputProps> = ({ config, value, onChange }) => {
+  return (
+    <input
+      type="text"
+      id={config.name}
+      // Ensure value is never undefined for controlled input; default to empty string
+      value={value === undefined || value === null ? '' : String(value)}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={config.ui_guidance}
+      className="form-input"
+    />
+  );
+};
+
+export const TextAreaField: React.FC<InputProps> = ({ config, value, onChange, readOnly }) => {
+  return (
+    <textarea
+      id={config.name}
+      // Ensure value is never undefined; default to empty string
+      value={value === undefined || value === null ? '' : String(value)}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={config.ui_guidance}
+      className="form-textarea"
+      rows={4}
+      readOnly={readOnly} // Pass readOnly prop to the textarea element
+    />
+  );
+};
+
+export const DropdownField: React.FC<InputProps> = ({ config, value, onChange }) => {
+  return (
+    <select
+      id={config.name}
+      // Ensure value is string for select; default to empty string if undefined/null
+      value={value === undefined || value === null ? '' : String(value)}
+      onChange={(e) => onChange(e.target.value)}
+      className="form-select"
+    >
+      {/* Add a default placeholder option if needed, especially if initial value can be empty */}
+      {/* <option value="" disabled>{`Select ${config.ui_guidance}`}</option> */}
+      {config.values?.map((option: string) => (
+        <option key={option} value={option}>
+          {option}
+        </option>
+      ))}
+    </select>
+  );
+};
+
+export const SliderField: React.FC<InputProps> = ({ config, value, onChange }) => {
+  // Ensure value is a number for range input; default to min or 0 if undefined/null
+  const numericValue = (v: string | number | undefined | null): number => {
+    if (v === undefined || v === null || v === '') {
+      return config.min ?? 0;
+    }
+    const num = Number(v);
+    return isNaN(num) ? (config.min ?? 0) : num;
+  };
+
+  return (
+    <div className="slider-container">
+      <input
+        type="range"
+        id={config.name}
+        min={config.min ?? 0}
+        max={config.max ?? 100}
+        value={numericValue(value)}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="form-slider"
+      />
+      <span className="slider-value">{numericValue(value)}</span>
+    </div>
+  );
+};
+
+export const TagInput: React.FC<InputProps> = ({ config, value, onChange }) => {
+  // Value for TagInput is expected to be a comma-separated string
+  const stringValue = (value === undefined || value === null) ? '' : String(value);
+  const tags = stringValue.split(',').filter(tag => tag.trim() !== '');
+
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      const inputElement = e.currentTarget;
+      const newTag = inputElement.value.trim();
+      if (newTag && !tags.includes(newTag)) {
+        const newTags = [...tags, newTag];
+        onChange(newTags.join(','));
+      }
+      inputElement.value = ''; // Clear input field
+    }
+  };
+
+  const removeTag = (tagToRemove: string) => {
+    const newTags = tags.filter(tag => tag !== tagToRemove);
+    onChange(newTags.join(','));
+  };
+
+  return (
+    <div className="tag-input-container">
+      <div className="tag-list">
+        {tags.map((tag, index) => (
+          <span key={`${tag}-${index}`} className="tag"> {/* Improved key */}
+            {tag}
+            <button type="button" onClick={() => removeTag(tag)} className="tag-remove">×</button>
+          </span>
+        ))}
+      </div>
+      <input
+        type="text"
+        onKeyDown={handleKeyDown}
+        placeholder={config.ui_guidance}
+        className="tag-input"
+        id={config.name} // Add id for label association
+      />
+    </div>
+  );
+};
+
+export const CheckboxGroup: React.FC<InputProps> = ({ config, value, onChange }) => {
+  // Value for CheckboxGroup is expected to be a comma-separated string of selected values
+  const stringValue = (value === undefined || value === null) ? '' : String(value);
+  const selectedValues = stringValue.split(',').filter(v => v.trim() !== '');
+
+
+  const toggleValue = (optionValue: string) => {
+    const newSelected = selectedValues.includes(optionValue)
+      ? selectedValues.filter(v => v !== optionValue)
+      : [...selectedValues, optionValue];
+    onChange(newSelected.join(','));
+  };
+
+  return (
+    <div className="checkbox-group" id={config.name}> {/* Add id for label association if needed */}
+      {config.values?.map((option) => (
+        <label key={option} className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={selectedValues.includes(option)}
+            onChange={() => toggleValue(option)}
+            className="checkbox-input"
+            name={config.name} // Group checkboxes under the same name
+            value={option} // Assign value to checkbox for form submission (if applicable)
+          />
+          {option}
+        </label>
+      ))}
+    </div>
+  );
+};
+
+===== src/models/StageArchetype.ts =====
+
+export interface ArchetypeInput {
+  name: string;
+  type:
+    | 'TextInput'
+    | 'LargeTextArea'
+    | 'Dropdown'
+    | 'Slider'
+    | 'CheckboxGroup'
+    | 'TagInput'
+    | 'TwoPanelEditor'
+    | 'ReadOnlyTextArea'
+    | 'JSON';
+  description: string;
+  ui_guidance: string;
+  defaultValue?: string | number;
+  optional?: boolean;
+  values?: string[];
+  min?: number;
+  max?: number;
+  conditional?: boolean;
+  conditionalField?: string;
+  conditionalValue?: string;
+}
+
+export interface ValidatorProfile {
+  name: string;
+  method: string;
+  description: string;
+  expected_outcome: string;
+}
+
+export interface StageArchetype {
+  name: string;
+  purpose: string;
+  inputs: ArchetypeInput[];
+  ai_instructions_template: string;
+  validator_profiles?: ValidatorProfile[]; // optional is safest
+}
+
+export type ArchetypesMap = Record<string, StageArchetype>;
+
+===== src/data/stage_archetypes.ts =====
+
+// Full archetype definitions for Hybrid Thinking
+
+import type { ArchetypesMap } from '../models/StageArchetype';
+
+export const archetypesData: ArchetypesMap = {
+  SETUP_AND_BRIEFING: {
+    name: "Setup & Briefing",
+    purpose: "Gather initial requirements, context, and parameters from the user or system to define the scope and direction of the workflow or a significant part of it.",
+    inputs: [
+      {
+        name: "project_goal",
+        type: "TextInput",
+        description: "High-level objective for the project or task.",
+        ui_guidance: "What is the overall objective?",
+        defaultValue: ""
+      },
+      {
+        name: "target_audience_description",
+        type: "LargeTextArea",
+        optional: true,
+        description: "Description of the intended audience.",
+        ui_guidance: "Describe your ideal audience (optional).",
+        defaultValue: ""
+      },
+      {
+        name: "key_topic_or_product",
+        type: "TextInput",
+        description: "The central subject, topic, or product being addressed.",
+        ui_guidance: "What is the main topic or product?",
+        defaultValue: ""
+      },
+      {
+        name: "constraints_and_boundaries",
+        type: "LargeTextArea",
+        optional: true,
+        description: "Non-negotiables, limitations, or specific exclusions.",
+        ui_guidance: "Any limitations, e.g., budget, time, specific exclusions? (optional)",
+        defaultValue: ""
+      }
+    ],
+    ai_instructions_template: `You are an expert project planner and requirements analyst.
+Based on the provided project goal: "{{project_goal}}" for the key topic/product: "{{key_topic_or_product}}",
+targeting audience: "{{target_audience_description | default('not specified')}}" with constraints: "{{constraints_and_boundaries | default('none specified')}}":
+1. Clarify any ambiguities in the provided information.
+2. Define the primary parameters or information pillars needed.
+3. Structure your output clearly.`
+  },
+
+  IDEATION_AND_EXPLORATION: {
+    name: "Ideation & Exploration",
+    purpose: "Generate a broad range of ideas, possibilities, outlines, or initial concepts. Focus is on breadth rather than depth or polish.",
+    inputs: [
+      {
+        name: "seed_concept",
+        type: "TextInput",
+        description: "Starting point or topic for ideation.",
+        ui_guidance: "What topic or question do you want ideas for?",
+        defaultValue: ""
+      },
+      {
+        name: "number_of_ideas",
+        type: "Slider",
+        min: 1,
+        max: 20,
+        description: "Desired number of distinct ideas to generate.",
+        ui_guidance: "How many ideas?",
+        defaultValue: 5
+      },
+      {
+        name: "creativity_level",
+        type: "Dropdown",
+        values: ["Conventional", "Balanced", "Highly Innovative"],
+        description: "Preferred level of novelty and unconventionality for the ideas.",
+        ui_guidance: "Select creativity level.",
+        defaultValue: "Balanced"
+      },
+      {
+        name: "output_format_preference",
+        type: "Dropdown",
+        values: ["Bulleted List", "Mind Map Concepts", "Short Paragraphs"],
+        description: "Desired format for presenting the generated ideas.",
+        ui_guidance: "Choose output format.",
+        defaultValue: "Bulleted List"
+      }
+    ],
+    ai_instructions_template: `You are a creative brainstorming assistant.
+Generate {{number_of_ideas}} distinct ideas based on the seed concept: "{{seed_concept}}".
+The desired creativity level is "{{creativity_level}}".
+Present the ideas as a {{output_format_preference}}.
+Focus on diversity and originality in your suggestions.`
+  },
+  DRAFTING_AND_CREATION: {
+    name: "Drafting & Creation",
+    purpose: "Generate the primary content or artifact.",
+    inputs: [
+      {
+        name: "creation_brief",
+        type: "LargeTextArea",
+        description: "Outline, key points, or purpose guiding the content creation.",
+        ui_guidance: "Provide the brief, outline, or key points for creation.",
+        defaultValue: ""
+      },
+      {
+        name: "content_type",
+        type: "Dropdown",
+        values: ["Blog Post Section", "Email Draft", "Python Function Stub", "Product Description Snippet", "Social Media Post Text", "Summary of Text"],
+        defaultValue: "Blog Post Section",
+        description: "The specific type of content to be generated.",
+        ui_guidance: "Select the type of content to create."
+      },
+      {
+        name: "tone_and_style",
+        type: "Dropdown",
+        values: ["Formal", "Conversational", "Technical", "Persuasive", "Humorous", "Empathetic"],
+        defaultValue: "Conversational",
+        description: "Desired tone and writing style for the content.",
+        ui_guidance: "Choose the tone and style."
+      },
+      {
+        name: "target_length",
+        type: "Dropdown",
+        values: ["Short (e.g., 1-2 paragraphs)", "Medium (e.g., 3-5 paragraphs)", "Long (e.g., 5+ paragraphs)"],
+        description: "Approximate desired length of the generated content.",
+        ui_guidance: "Select target length.",
+        defaultValue: "Medium (e.g., 3-5 paragraphs)"
+      },
+      {
+        name: "keywords_to_include",
+        type: "TagInput",
+        optional: true,
+        description: "Specific keywords to be naturally incorporated into the content.",
+        ui_guidance: "Enter keywords to include (optional, comma-separated).",
+        defaultValue: ""
+      }
+    ],
+    ai_instructions_template: `You are an expert {{content_type}} creator.
+Draft the {{content_type}} based on this brief:
+"{{creation_brief}}"
+Adopt a {{tone_and_style}} tone and style.
+Aim for a {{target_length}} length.
+{{#if keywords_to_include}}Naturally incorporate these keywords: {{keywords_to_include}}.{{/if}}
+Ensure the output is coherent, engaging, and serves the brief's purpose.`
+  },
+
+  INFORMATION_GATHERING_AND_RESEARCH: {
+    name: "Information Gathering & Research",
+    purpose: "Find and synthesize external information, data, or evidence relevant to the task.",
+    inputs: [
+      {
+        name: "research_question",
+        type: "LargeTextArea",
+        description: "Specific question the research aims to answer.",
+        ui_guidance: "What specific question do you need to research?",
+        defaultValue: ""
+      },
+      {
+        name: "key_terms_for_search",
+        type: "TagInput",
+        optional: true,
+        description: "Keywords to focus the search on.",
+        ui_guidance: "Enter keywords (optional, comma-separated).",
+        defaultValue: ""
+      },
+      {
+        name: "types_of_information",
+        type: "CheckboxGroup",
+        values: ["Statistics", "Facts", "Expert Opinions", "Case Studies", "Definitions", "Tutorials", "Recent News"],
+        description: "Specific types of information to look for.",
+        ui_guidance: "Select the types of information needed.",
+        defaultValue: ["Facts", "Definitions"]
+      },
+      {
+        name: "desired_depth",
+        type: "Dropdown",
+        values: ["Quick Overview", "Detailed Summary", "Comprehensive Report Snippet"],
+        description: "Level of detail required for the research output.",
+        ui_guidance: "Choose the desired depth of information.",
+        defaultValue: "Detailed Summary"
+      }
+    ],
+    ai_instructions_template: `You are an expert research assistant.
+Investigate the research question: "{{research_question}}"
+{{#if key_terms_for_search}}Focus on the following key terms: {{key_terms_for_search}}.{{/if}}
+Gather the following types of information: {{types_of_information}}.
+Provide a {{desired_depth}} of information.
+Where possible, indicate the source or basis of the information. Present findings clearly and concisely.`
+  },
+
+  ANALYSIS_AND_EVALUATION: {
+    name: "Analysis & Evaluation",
+    purpose: "Critically examine existing information or generated content, identify patterns, assess quality, or derive insights.",
+    inputs: [
+      {
+        name: "content_for_analysis",
+        type: "ReadOnlyTextArea",
+        description: "The input text, data, or artifact to be evaluated.",
+        ui_guidance: "Paste or link the content to be analyzed.",
+        defaultValue: ""
+      },
+      {
+        name: "analysis_focus",
+        type: "CheckboxGroup",
+        values: ["Strengths", "Weaknesses", "Opportunities", "Threats (SWOT-like)", "Logical Fallacies", "Bias Detection", "Sentiment Analysis", "Key Themes Extraction", "Summarization Quality"],
+        description: "Specific aspects or perspectives for the analysis.",
+        ui_guidance: "Select the focus areas for analysis.",
+        defaultValue: ["Strengths", "Weaknesses"]
+      },
+      {
+        name: "evaluation_criteria",
+        type: "LargeTextArea",
+        optional: true,
+        description: "Specific benchmarks, questions, or criteria to guide the evaluation.",
+        ui_guidance: "Any specific questions or benchmarks for the analysis? (optional)",
+        defaultValue: ""
+      }
+    ],
+    ai_instructions_template: `You are an expert critical analyst.
+Analyze the following content:
+"{{content_for_analysis}}"
+Your analysis should focus on identifying: {{analysis_focus}}.
+{{#if evaluation_criteria}}Address these specific evaluation criteria: "{{evaluation_criteria}}"{{/if}}
+Provide a structured report of your findings, clearly explaining your reasoning and providing examples where applicable.`
+  },
+
+  REFINEMENT_AND_ITERATION: {
+    name: "Refinement & Iteration",
+    purpose: "Improve upon existing drafted content or artifacts based on feedback, analysis, or further instructions.",
+    inputs: [
+      {
+        name: "original_content",
+        type: "TwoPanelEditor",
+        description: "The draft content or code to be improved.",
+        ui_guidance: "Original content for refinement.",
+        defaultValue: ""
+      },
+      {
+        name: "refinement_goals",
+        type: "CheckboxGroup",
+        values: ["Improve Clarity", "Enhance Engagement", "Correct Grammatical Errors", "Shorten/Condense", "Expand on Specific Section", "Change Tone", "Simplify Language", "Improve Flow"],
+        description: "The primary objectives for refining the content.",
+        ui_guidance: "Select the main goals for this refinement.",
+        defaultValue: ["Improve Clarity", "Correct Grammatical Errors"]
+      },
+      {
+        name: "specific_instructions",
+        type: "LargeTextArea",
+        optional: true,
+        description: "Detailed changes, feedback, or specific sections to focus on.",
+        ui_guidance: "Any detailed feedback or specific changes to make? (e.g., 'Make the introduction more impactful', 'Rephrase the third paragraph')",
+        defaultValue: ""
+      },
+      {
+        name: "target_tone_for_change",
+        type: "Dropdown",
+        conditional: true,
+        values: ["Formal", "Conversational", "Technical", "Persuasive", "Humorous", "Empathetic"],
+        description: "The new tone to adopt if 'Change Tone' is selected as a goal.",
+        ui_guidance: "If changing tone, select the new target tone.",
+        optional: true
+      }
+    ],
+    ai_instructions_template: `You are an expert editor and content refiner.
+Review and refine the following original content:
+"{{original_content}}"
+Your primary refinement goals are to: {{refinement_goals}}.
+{{#if specific_instructions}}Incorporate the following specific instructions: "{{specific_instructions}}"{{/if}}
+{{#if target_tone_for_change}}If 'Change Tone' is a goal, adjust the tone to be more {{target_tone_for_change}}.{{/if}}
+Preserve the core intent of the original content unless explicitly instructed to change it.
+Track changes or clearly indicate significant modifications if possible, or provide the fully revised text.`
+  },
+
+  VALIDATION_AND_QUALITY_ASSURANCE: {
+    name: "Validation & Quality Assurance",
+    purpose: "Check the output against predefined criteria, rules, or objectives.",
+    inputs: [
+      {
+        name: "content_to_validate",
+        type: "ReadOnlyTextArea",
+        description: "The content or artifact requiring validation.",
+        ui_guidance: "Content for validation.",
+        defaultValue: ""
+      },
+      {
+        name: "validation_type",
+        type: "CheckboxGroup",
+        values: ["Grammar & Spell Check", "Fact-Checking (against provided source or general knowledge)", "Style Guide Compliance", "Code Linting (specify language/rules)", "Accessibility Check (basic principles)", "Plagiarism Check (conceptual)", "Tone Consistency Check"],
+        description: "Specific types of validation checks to perform.",
+        ui_guidance: "Select the types of validation needed.",
+        defaultValue: ["Grammar & Spell Check"]
+      },
+      {
+        name: "reference_document_or_rules",
+        type: "LargeTextArea",
+        optional: true,
+        description: "E.g., style guide, fact source, specific linting rules.",
+        ui_guidance: "Provide reference style guide, rules, or source for fact-checking (optional).",
+        defaultValue: ""
+      }
+    ],
+    ai_instructions_template: `You are a meticulous Quality Assurance specialist.
+Validate the following content:
+"{{content_to_validate}}"
+Perform the following checks: {{validation_type}}.
+{{#if reference_document_or_rules}}Use this reference for relevant checks: "{{reference_document_or_rules}}"{{/if}}
+Report all findings clearly. For each issue found, describe the issue, its location (if applicable), and suggest a correction or improvement.`
+  },
+
+  FORMATTING_AND_FINALIZATION: {
+    name: "Formatting & Finalization",
+    purpose: "Prepare the output for its final use or distribution according to specified formatting requirements.",
+    inputs: [
+      {
+        name: "raw_content",
+        type: "ReadOnlyTextArea",
+        description: "The finalized content before platform-specific formatting.",
+        ui_guidance: "Finalized content for formatting.",
+        defaultValue: ""
+      },
+      {
+        name: "target_format",
+        type: "Dropdown",
+        values: ["Markdown (CommonMark)", "HTML (Basic)", "Plain Text (with line breaks)", "JSON (Pretty Print)", "Formatted Word Document Outline (Conceptual)", "Social Media Snippet (e.g. Twitter-ready)"],
+        description: "The desired output format for the content.",
+        ui_guidance: "Select the target output format.",
+        defaultValue: "Markdown (CommonMark)"
+      },
+      {
+        name: "formatting_rules_or_template",
+        type: "LargeTextArea",
+        optional: true,
+        description: "Specific rules (e.g., 'Ensure H2 for main sections, H3 for subsections') or a template structure.",
+        ui_guidance: "Specify formatting rules or a template (e.g., 'Use bullet points for lists', 'Wrap code blocks in ```') (optional).",
+        defaultValue: ""
+      }
+    ],
+    ai_instructions_template: `You are an expert content formatter.
+Convert the following raw content:
+"{{raw_content}}"
+Into {{target_format}} format.
+{{#if formatting_rules_or_template}}Apply the following formatting rules/template: "{{formatting_rules_or_template}}"{{/if}}
+Ensure the output is well-formed and syntactically correct for the {{target_format}}.
+Preserve all substantive content from the original.`
+  },
+
+  META_MANAGEMENT_AND_UTILITY: {
+    name: "Meta Management & Utility",
+    purpose: "Internal system operations that support the workflow but may not be explicit user-facing AI tasks.",
+    inputs: [
+      {
+        name: "operation_type",
+        type: "Dropdown",
+        values: ["SaveWorkflowState", "LogStageOutput", "ExecuteBranchingLogic", "AggregateParallelOutputs", "NotifyUser"],
+        description: "The specific meta operation to perform.",
+        ui_guidance: "Select the type of meta operation."
+      },
+      {
+        name: "operation_payload",
+        type: "JSON",
+        description: "Flexible data structure for the operation",
+        ui_guidance: "Provide the data payload for the operation."
+      }
+    ],
+    ai_instructions_template: `N/A (Generally not AI-prompt driven by users. If AI is used for a sub-task like 'summarize workflow progress for logging', it would use a prompt structure from another archetype, configured by the system.)`
+  }
+};

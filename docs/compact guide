@@ -1,0 +1,204 @@
+# Hybrid Thinking Firebase + Google Cloud Architecture (Compact Guide)
+
+This guide condenses the full Firebase/GCP implementation plan, including insights from project analysis and infrastructure suggestions. It's structured to help you implement, understand, and extend the Hybrid Thinking Workflow app.
+
+---
+
+## 🔍 Summary of Current State
+
+### ✅ Strengths
+
+* **Frontend:** React + TypeScript + Vite
+* **Structure:** Modular with service, hook, model, and component layers
+* **LLM Integration:** Gemini via `src/services/ai.ts`
+* **Stage-based Orchestration:** Uses Archetypes and Prompts
+
+### ⚠️ Gaps
+
+* No backend or data persistence
+* No user authentication
+* No workflow storage
+* Minimal error recovery/logging
+
+---
+
+## 🏗️ Firebase + GCP Service Map
+
+### Authentication
+
+* **Firebase Auth:** User login/signup, OAuth, role-based access
+* **Secret Manager (GCP):** Store AI API keys securely
+
+### Storage
+
+* **Firestore:**
+
+  * `/users/`
+  * `/workflowTemplates/`
+  * `/savedWorkflows/`
+  * `/promptLibrary/`
+  * `/systemConfig/`
+
+* **Firebase Storage:**
+
+  * `/users/{uid}/*` for workflow artifacts
+  * `/public/*` and `/templates/*` for assets
+
+### Serverless Logic
+
+* **Cloud Functions:**
+
+  * AI proxy (e.g., OpenAI, Gemini)
+  * Workflow validation engine
+  * User triggers (onCreate, onDelete)
+* **Cloud Run (Optional):** For heavy background tasks
+
+### Messaging / Scheduling
+
+* **Pub/Sub:** Event triggers for async workflows
+* **Cloud Tasks:** Rate limiting, retries, delayed execution
+
+### AI Integration
+
+* **API Gateway:** Unified entrypoint across providers
+* **Vertex AI (Optional):** For model training or internal tools
+
+### Observability
+
+* **Cloud Logging & Monitoring:** Track events, performance, costs
+
+---
+
+## 🔐 Security
+
+### Firestore Rules (Highlights)
+
+```ts
+match /users/{userId} {
+  allow read, write: if request.auth.uid == userId;
+}
+match /workflowTemplates/{templateId} {
+  allow read: if isPublic || createdBy == auth.uid;
+  allow write: if createdBy == auth.uid;
+}
+```
+
+### Storage Rules (Highlights)
+
+```ts
+match /users/{userId}/{allPaths=**} {
+  allow read, write: if auth.uid == userId;
+}
+match /public/{allPaths=**} {
+  allow read;
+}
+```
+
+---
+
+## 🧱 Data Models (Simplified)
+
+### `UserProfile`
+
+```ts
+{
+  uid: string,
+  role: 'admin' | 'user',
+  preferences: { defaultModelProvider, uiTheme, ... },
+  usage: { promptCount, tokensUsed, ... }
+}
+```
+
+### `WorkflowTemplate`
+
+```ts
+{
+  name, category, tags,
+  stages: [{ id, archetypeKey, inputs, validators }]
+}
+```
+
+### `SavedWorkflow`
+
+```ts
+{
+  templateId, userId, stages: [{ inputs, outputs: [{ modelId, promptText, responseText }] }]
+}
+```
+
+### `PromptTemplate`
+
+```ts
+{
+  name, prompt, variableDefinitions: [{ name, defaultValue }],
+  usage: { count, averageRating }
+}
+```
+
+---
+
+## 🚀 Implementation Phases
+
+### Phase 1: MVP Foundation
+
+* Firebase init (auth, firestore, storage, functions)
+* User auth + basic profile collection
+* Initial Firestore collections and dummy data
+* Setup Cloud Function proxy for Gemini/OpenAI
+
+### Phase 2: Workflow Logic
+
+* Workflow saving/loading
+* Form input binding to Firestore
+* Prompt library creation
+* Add validators (basic)
+
+### Phase 3: Observability + Scale
+
+* Add Pub/Sub or Cloud Tasks for async steps
+* Set up logging/monitoring in GCP
+* Add secure Secret Manager for API keys
+
+### Phase 4: Optimization
+
+* Use Vertex AI if custom models needed
+* Add Cloud Run services (e.g., PDF summarizer)
+* Performance tuning, rate limiting, usage caps
+
+---
+
+## 🛠️ Developer Tips
+
+### Local Dev
+
+* Use `.env` for Firebase/Gemini/OpenAI keys
+* Structure Firestore access via hooks or services (avoid sprawl)
+
+### Git Hygiene
+
+* Never commit `.env`, `node_modules`, or Firebase service account keys
+* Always run `git status` before committing cloud function logic
+
+### Error Handling
+
+* Wrap fetch calls with `try/catch`
+* Log stream chunks to debug malformed JSON (as in `ai.ts`)
+
+### Recommended Firebase CLI Setup
+
+```bash
+firebase init firestore functions auth storage
+firebase deploy --only functions,firestore,auth
+```
+
+---
+
+## ✅ You're Here
+
+You've defined your architecture, written the necessary AI execution logic, and know how to scale and secure it. Next steps:
+
+* Wire up Firestore reads/writes to workflows
+* Finalize archetype editing UI
+* Deploy Firebase backend & connect to front end
+
+Let me know if you'd like help scaffolding any specific Cloud Function or Firestore action next.
