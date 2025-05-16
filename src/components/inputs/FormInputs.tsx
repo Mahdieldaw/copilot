@@ -5,6 +5,7 @@ export interface InputProps {
   config: ArchetypeInput;
   value: string | number;
   onChange: (value: string | number) => void;
+  readOnly?: boolean;
 }
 
 export const TextInputField: React.FC<InputProps> = ({ config, value, onChange }) => {
