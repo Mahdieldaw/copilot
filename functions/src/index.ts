@@ -35,3 +35,32 @@ export const callAIModel = functions.https.onCall(async (data: CallAIModelData, 
      functions.logger.info(`callAIModel returning mock: "${responseText}"`);
      return { text: responseText };
  });
+
+// Cloud Function that triggers when a new Firebase Authentication user is created
+export const onCreateUser = functions.auth.user().onCreate(async (user) => {
+    try {
+        // Construct the new user profile object
+        const newUserProfile = {
+            uid: user.uid,
+            email: user.email || null,
+            displayName: user.displayName || '',
+            role: 'user',
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            lastLoginAt: admin.firestore.FieldValue.serverTimestamp(),
+            preferences: {},
+            usage: { promptCount: 0, tokensUsed: 0 }
+        };
+
+        // Get a reference to the Firestore database
+        const db = admin.firestore();
+        
+        // Save the user profile to Firestore
+        await db.collection('users').doc(user.uid).set(newUserProfile);
+        
+        functions.logger.info(`User profile created for ${user.uid}`, { structuredData: true });
+        return null;
+    } catch (error) {
+        functions.logger.error('Error creating user profile:', error);
+        throw error;
+    }
+});
