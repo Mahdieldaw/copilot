@@ -24,7 +24,27 @@ Copy the firebaseConfig object.
 
 🤖 LLM Task (Code Generation/Guidance):
 
-"Given this Firebase config object: {PASTE YOUR COPIED CONFIG HERE}, show me how to set up a .env file in my Vite/React/TypeScript project to store these values (e.g., VITE_FIREBASE_API_KEY=...)."
+"Given this Firebase config object: {// Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+import { getAnalytics } from "firebase/analytics";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
+
+// Your web app's Firebase configuration
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const firebaseConfig = {
+  apiKey: "AIzaSyB0GH-IzFy47-NwIg4uruyoUzHhel2xOd4",
+  authDomain: "hybrid-thinking.firebaseapp.com",
+  projectId: "hybrid-thinking",
+  storageBucket: "hybrid-thinking.firebasestorage.app",
+  messagingSenderId: "429161076249",
+  appId: "1:429161076249:web:f86cfca6e823bb001cbc88",
+  measurementId: "G-8XTB50R6QZ"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);}, show me how to set up a .env file in my Vite/React/TypeScript project to store these values (e.g., VITE_FIREBASE_API_KEY=...)."
 
 "Then, show me the content for src/services/firebase.ts that initializes Firebase using these environment variables (import.meta.env.VITE_FIREBASE_...). It should export the initialized app, auth, and firestore instances."
 

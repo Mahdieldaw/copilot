@@ -1,50 +1,39 @@
 import { useState, useCallback } from 'react';
-import { sendPrompt, cancelRequest } from '../services/ai'; // Corrected import path
+import { sendPrompt } from '../services/ai';
 
 type AIExecutionStatus = 'idle' | 'loading' | 'done' | 'error';
 
 interface UseAIExecutionReturn {
   response: string;
   status: AIExecutionStatus;
-  error: string | null;
-  run: (prompt: string) => Promise<void>;
-  cancel: () => void;
+  error: Error | null;
+  run: (prompt: string, modelId: string, generationConfig?: object) => Promise<void>;
 }
 
 export function useAIExecution(): UseAIExecutionReturn {
   const [response, setResponse] = useState<string>('');
   const [status, setStatus] = useState<AIExecutionStatus>('idle');
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Error | null>(null);
 
-  const run = useCallback(async (prompt: string) => {
+  const run = useCallback(async (prompt: string, modelId: string, generationConfig?: object) => {
     setResponse('');
     setError(null);
     setStatus('loading');
 
     try {
-      for await (const chunk of sendPrompt(prompt)) {
-        setResponse((prev) => prev + chunk);
-      }
+      const resultText = await sendPrompt(prompt, modelId, generationConfig);
+      setResponse(resultText);
       setStatus('done');
-    } catch (e) {
-      const errorMessage = e instanceof Error ? e.message : String(e);
-      // Check if the error is due to an abort operation
-      if (e instanceof DOMException && e.name === 'AbortError') {
-        console.log('Request aborted by user.');
-        setStatus('idle'); // Or 'done' if partial response is acceptable, or a new 'cancelled' state
+    } catch (e: any) {
+      console.error("Error in useAIExecution run:", e);
+      if (e instanceof Error) {
+        setError(e);
       } else {
-        setError(errorMessage);
-        setStatus('error');
+        setError(new Error(String(e.message || 'An unknown error occurred')));
       }
+      setStatus('error');
     }
   }, []);
 
-  const cancel = useCallback(() => {
-    cancelRequest();
-    // Optionally, set status here if needed, e.g., if a request was loading
-    // setStatus('idle'); // Or a 'cancelled' state
-    // The sendPrompt loop should catch the AbortError and handle status
-  }, []);
-
-  return { run, cancel, response, status, error };
+  return { run, response, status, error };
 }

@@ -10,23 +10,7 @@ import {
   TagInput,
   CheckboxGroup
 } from './components/inputs/FormInputs';
-import { useAIExecution } from '@/hooks/useAIExecution'; // Updated import path to use alias
-
-// Placeholder functions
-const copyText = (text: string) => {
-  navigator.clipboard.writeText(text).then(() => {
-    console.log('Text copied to clipboard');
-  }).catch(err => {
-    console.error('Failed to copy text: ', err);
-  });
-};
-
-const recordFeedback = (isPositive: boolean) => {
-  console.log(`Feedback recorded: ${isPositive ? 'Positive' : 'Negative'}`);
-};
-
-// Simple Spinner component (can be moved to a separate file later)
-const Spinner = () => <div className="spinner">Loading...</div>;
+import { useAIExecution } from '@/hooks/useAIExecution';
 
 function App() {
   const archetypes: ArchetypesMap = archetypesData;
@@ -36,8 +20,9 @@ function App() {
   const [editablePromptTemplate, setEditablePromptTemplate] = useState('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState('configuration');
+  const [selectedModelId, setSelectedModelId] = useState<string>('gemini-1.5-flash-latest');
   
-  const { run, cancel, response: aiOutput, status, error } = useAIExecution(); // Initialize hook
+  const { run, response: aiOutput, status, error } = useAIExecution();
 
   const currentArchetype = archetypes[selectedArchetypeKey];
 
@@ -55,7 +40,7 @@ function App() {
   useEffect(() => {
     let template = editablePromptTemplate;
     Object.entries(inputs).forEach(([key, value]) => {
-      const valStr = String(value ?? ''); // Ensure value is always a string
+      const valStr = String(value ?? '');
       template = template.replace(new RegExp(`{{${key}}}`, 'g'), valStr);
     });
     setCurrentPromptTemplate(template);
@@ -64,21 +49,6 @@ function App() {
   // Handle input changes
   const handleInputChange = (name: string, value: string | number) => {
     setInputs(prev => ({ ...prev, [name]: value }));
-  };
-
-  // Handle prompt template changes
-  const handlePromptTemplateChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setEditablePromptTemplate(e.target.value);
-  };
-
-  // Reset to defaults
-  const handleResetToDefaults = () => {
-    const initialInputs: Record<string, string | number> = {};
-    currentArchetype.inputs.forEach(input => {
-      initialInputs[input.name] = input.defaultValue ?? '';
-    });
-    setInputs(initialInputs);
-    setEditablePromptTemplate(currentArchetype.ai_instructions_template);
   };
 
   // Render input based on type
@@ -103,10 +73,6 @@ function App() {
         return <TagInput {...props} />;
       case 'CheckboxGroup':
         return <CheckboxGroup {...props} />;
-      case 'ReadOnlyTextArea':
-        // Ensure ReadOnlyTextArea also gets the correct value prop if it's meant to display aiOutput
-        // For now, assuming it's like other inputs
-        return <TextAreaField {...props} readOnly={true} />;
       default:
         return null;
     }
@@ -114,12 +80,11 @@ function App() {
 
   return (
     <div className="app-container">
-      <h1>Hybrid Thinking Workflow Builder</h1>
-      <div className="main-content">
-        <div className={`sidebar ${isSidebarOpen ? 'open' : 'closed'}`}>
-          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
-            {isSidebarOpen ? '←' : '→'}
-          </button>
+      <div className={`sidebar ${isSidebarOpen ? '' : 'closed'}`}>
+        <button onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
+          {isSidebarOpen ? '◀' : '▶'}
+        </button>
+        {isSidebarOpen && (
           <div className="archetype-list">
             {Object.entries(archetypes).map(([key, archetype]) => (
               <button
@@ -131,89 +96,83 @@ function App() {
               </button>
             ))}
           </div>
+        )}
+      </div>
+
+      <div className="content-area">
+        <div className="tab-buttons">
+          <button
+            className={activeTab === 'configuration' ? 'active' : ''}
+            onClick={() => setActiveTab('configuration')}
+          >
+            Configuration
+          </button>
+          <button
+            className={activeTab === 'preview' ? 'active' : ''}
+            onClick={() => setActiveTab('preview')}
+          >
+            Preview & Execute
+          </button>
         </div>
 
-        <div className="content-area">
-          <h2>{currentArchetype.name}</h2>
-          <p>{currentArchetype.purpose}</p>
-          
-          <div className="tab-buttons">
-            <button 
-              className={activeTab === 'configuration' ? 'active' : ''} 
-              onClick={() => setActiveTab('configuration')}
-            >
-              Configuration
-            </button>
-            <button 
-              className={activeTab === 'preview' ? 'active' : ''} 
-              onClick={() => setActiveTab('preview')}
-            >
-              Preview & Run AI
-            </button>
-          </div>
-
-          {activeTab === 'configuration' ? (
-            <div className="configuration-panel">
-              <div className="inputs-section">
-                {currentArchetype.inputs.map(input => (
-                  <div key={input.name} className="input-group">
-                    <label htmlFor={input.name}>
-                      {input.ui_guidance}
-                      {input.optional && <span className="optional">(optional)</span>}
-                    </label>
-                    {renderInput(input)}
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="preview-panel">
-              <textarea
-                value={editablePromptTemplate}
-                onChange={handlePromptTemplateChange}
-                placeholder="Edit the prompt template..."
-              />
-              <div className="preview-output">
-                <h3>Preview (Editable Template):</h3>
-                <pre>{currentPromptTemplate}</pre>
-              </div>
-              <button onClick={handleResetToDefaults}>Reset to Default Template</button>
-              
-              <hr style={{margin: '20px 0'}} />
-
-              <h3>AI Interaction</h3>
-              <Button onClick={() => run(currentPromptTemplate)} disabled={status === 'loading' || !currentPromptTemplate.trim()}>
-                {status === 'loading' ? 'Running…' : 'Run AI'}
-              </Button>
-
-              <div className="ai-output-panel">
-                {status === 'idle' && !aiOutput && <p>Click “Run AI” to generate output.</p>}
-                {status === 'loading' && <Spinner />}
-                {aiOutput && <pre>{aiOutput}</pre>}
-                {status === 'error' && <p className="error">Error: {error}</p>}
-              </div>
-
-              {status === 'loading' && <Button onClick={cancel}>Cancel</Button>}
-              {status === 'done' && <Button onClick={() => run(currentPromptTemplate)} disabled={!currentPromptTemplate.trim()}>Regenerate</Button>}
-
-              {status === 'done' && aiOutput && (
-                <div className="actions-panel" style={{marginTop: '10px'}}>
-                  <Button onClick={() => copyText(aiOutput)}>Copy Output</Button>
-                  <Button onClick={() => recordFeedback(true)} style={{marginLeft: '5px'}}>👍</Button>
-                  <Button onClick={() => recordFeedback(false)} style={{marginLeft: '5px'}}>👎</Button>
+        {activeTab === 'configuration' && (
+          <div className="configuration-panel">
+            <h2>{currentArchetype.name}</h2>
+            <p>{currentArchetype.purpose}</p>
+            <div className="inputs-container">
+              {currentArchetype.inputs.map(input => (
+                <div key={input.name} className="input-group">
+                  <label>
+                    {input.ui_guidance}
+                    {input.optional && <span className="optional">(Optional)</span>}
+                  </label>
+                  {renderInput(input)}
                 </div>
-              )}
+              ))}
             </div>
-          )}
-        </div>
+          </div>
+        )}
+
+        {activeTab === 'preview' && (
+          <div className="preview-panel">
+            <div className="model-selector" style={{ marginBottom: '1rem' }}>
+              <label htmlFor="model-select" style={{ marginRight: '10px' }}>Select Model:</label>
+              <select
+                id="model-select"
+                value={selectedModelId}
+                onChange={(e) => setSelectedModelId(e.target.value)}
+                className="form-select"
+                style={{ marginRight: '20px', padding: '5px' }}
+              >
+                <option value="gemini-1.5-flash-latest">Gemini 1.5 Flash (Mocked)</option>
+                <option value="gemini-1.5-pro-latest">Gemini 1.5 Pro (Mocked)</option>
+                <option value="custom-mock-model-001">Custom Mock Model (Mocked)</option>
+              </select>
+            </div>
+
+            <textarea
+              value={currentPromptTemplate}
+              readOnly
+              className="preview-output"
+            />
+            <button 
+              onClick={() => run(currentPromptTemplate, selectedModelId, {})}
+              disabled={status === 'loading'}
+            >
+              {status === 'loading' ? 'Running...' : 'Run AI'}
+            </button>
+            {error && <div className="error-message" style={{ color: 'red', marginTop: '1rem' }}>{error.message}</div>}
+            {aiOutput && (
+              <div className="ai-output">
+                <h3>AI Response:</h3>
+                <pre className="preview-output">{aiOutput}</pre>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
 }
-
-// Basic Button component to avoid TS errors for now, can be replaced with actual UI library button
-const Button = (props: React.ButtonHTMLAttributes<HTMLButtonElement>) => {
-  return <button {...props} />;
-};
 
 export default App;
